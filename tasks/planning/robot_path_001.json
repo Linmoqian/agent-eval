@@ -1,0 +1,20 @@
+{
+  "task_id": "robot_path_001",
+  "category": "planning",
+  "instruction": "根据地图规划机器人完成所有目标点任务",
+  "input": {
+    "map": "world_01.json"
+  },
+  "tools": [
+    "scan",
+    "move",
+    "clear"
+  ],
+  "constraints": {
+    "max_steps": 50,
+    "max_time": 120
+  },
+  "ground_truth": {
+    "targets": 8
+  }
+}
