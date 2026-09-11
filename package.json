@@ -1,0 +1,14 @@
+{
+  "name": "agent-eval",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent 评估框架",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
