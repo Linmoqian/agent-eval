@@ -1,0 +1,11 @@
+{
+  "task_id": "planning_hard_001",
+  "category": "planning",
+  "difficulty": "hard",
+  "tags": ["long-horizon", "obstacle", "replanning"],
+  "instruction": "根据地图规划机器人访问全部 14 个目标点；地图大、障碍多，遇到移动受阻时需要重新规划路线",
+  "input": { "map": "world_04.json" },
+  "tools": ["scan", "move", "clear"],
+  "constraints": { "max_steps": 60, "max_time": 180 },
+  "ground_truth": { "targets": 14 }
+}

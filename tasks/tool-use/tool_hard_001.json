@@ -1,0 +1,11 @@
+{
+  "task_id": "tool_hard_001",
+  "category": "tool-use",
+  "difficulty": "hard",
+  "tags": ["state-manipulation", "long-horizon"],
+  "instruction": "在键值存储中完成 8 步操作链：(1) 读出 a；(2) 将 a 写为 a 与 b 之和；(3) 新增键 d，值为新 a 的 10 倍；(4) 读出 b；(5) 将 b 覆写为 100；(6) 删除键 c；(7) 新增键 e，值为 \"final\"；(8) 用 list 列出全部键值确认最终状态",
+  "input": { "store": "kv", "initial": { "a": 1, "b": 2, "c": 3 } },
+  "tools": ["read", "write", "erase", "list"],
+  "constraints": { "max_steps": 20, "max_time": 120 },
+  "ground_truth": { "ops": 8, "state": { "a": 3, "b": 100, "d": 30, "e": "final" } }
+}

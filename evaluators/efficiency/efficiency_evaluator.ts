@@ -28,6 +28,26 @@ export interface EfficiencyDetails {
   // 汇总 token
   inputTokens: number;
   outputTokens: number;
+  // 执行效率 = TaskProgress / ToolCalls（每次工具调用换来的任务进度，无进度观测时 null）
+  executionEfficiency: number | null;
+}
+
+// 从一条 observation JSON 中提取任务进度（统一 progress 协议，无则 -1）
+function extractProgress(observation: string): number {
+  try {
+    const parsed = JSON.parse(observation) as {
+      progress_completed?: unknown;
+      completed_targets?: unknown;
+    };
+    for (const field of ["progress_completed", "completed_targets"] as const) {
+      if (typeof parsed[field] === "number") {
+        return parsed[field] as number;
+      }
+    }
+  } catch {
+    // 非 JSON 观测直接忽略
+  }
+  return -1;
 }
 
 // 架构效率观测：latency 由 model_call/model_response 成对事件派生（Agent 不经手）
@@ -45,6 +65,8 @@ export class EfficiencyEvaluator implements Evaluator<EfficiencyDetails> {
     let latencyTotal = 0;
     let latencyCount = 0;
     let durationMs = 0;
+    // 任务进度：从 tool_result 观测提取的最大完成数（统一 progress 协议）
+    let maxCompleted = -1;
     // 单槽配对：模型调用严格串行，model_call 之后首个 model_response 即其响应
     let pendingCallAt: number | null = null;
 
@@ -69,11 +91,21 @@ export class EfficiencyEvaluator implements Evaluator<EfficiencyDetails> {
           break;
         case "tool_result":
           if (!step.ok) toolErrors += 1;
+          maxCompleted = Math.max(maxCompleted, extractProgress(step.observation));
           break;
         default:
           break;
       }
     }
+
+    // ExecutionEfficiency = TaskProgress / ToolCalls：进度归一到 ground_truth 期望值
+    const expected = Number(
+      context.task.ground_truth?.targets ?? context.task.ground_truth?.ops ?? 0
+    );
+    const executionEfficiency =
+      expected > 0 && toolCalls > 0 && maxCompleted >= 0
+        ? Math.min(maxCompleted / expected, 1) / toolCalls
+        : null;
 
     const hasFatalError = trace.steps.some((s) => s.kind === "error" && s.fatal === true);
     return {
@@ -89,7 +121,8 @@ export class EfficiencyEvaluator implements Evaluator<EfficiencyDetails> {
         latencyMsMean: latencyCount > 0 ? Math.round(latencyTotal / latencyCount) : 0,
         durationMs,
         inputTokens,
-        outputTokens
+        outputTokens,
+        executionEfficiency
       }
     };
   }

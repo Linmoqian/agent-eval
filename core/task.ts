@@ -15,10 +15,14 @@ export interface TaskConstraints {
 
 // 标准任务：Agent 架构无论怎么变，都只拿到这一份任务
 export interface Task {
-  // 任务唯一标识
+  // 任务唯一标识，套件命名规范：<category>_<difficulty>_<序号>，如 planning_medium_001
   task_id: string;
   // 任务类别：planning / coding / tool-use / reasoning / robotics
   category: string;
+  // 难度分级（M8 套件元数据，与类别一起做切片分析）
+  difficulty?: "easy" | "medium" | "hard";
+  // 行为特征标签：long-horizon / replanning / execution / state-manipulation 等
+  tags?: string[];
   // 自然语言指令
   instruction: string;
   // 任务输入（地图文件、代码路径等，由任务环境解释）
@@ -81,5 +85,24 @@ export function validateTask(raw: unknown): Task {
   const constraints = requireOptionalObject("constraints") as TaskConstraints | undefined;
   const ground_truth = requireOptionalObject("ground_truth");
 
-  return { task_id, category, instruction, input, tools, constraints, ground_truth };
+  // difficulty 可选但须在枚举内
+  const DIFFICULTIES = ["easy", "medium", "hard"];
+  if (obj.difficulty !== undefined && !DIFFICULTIES.includes(String(obj.difficulty))) {
+    throw new TaskValidationError(
+      `task.difficulty 必须是 ${DIFFICULTIES.join(" / ")}，实际 ${String(obj.difficulty)}`
+    );
+  }
+  const difficulty = obj.difficulty as Task["difficulty"] | undefined;
+
+  // tags 可选字符串数组
+  const rawTags = obj.tags;
+  if (
+    rawTags !== undefined &&
+    (!Array.isArray(rawTags) || rawTags.some((t) => typeof t !== "string"))
+  ) {
+    throw new TaskValidationError("task.tags 必须是字符串数组");
+  }
+  const tags = rawTags as string[] | undefined;
+
+  return { task_id, category, difficulty, tags, instruction, input, tools, constraints, ground_truth };
 }

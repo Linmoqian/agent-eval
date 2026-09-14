@@ -1,0 +1,11 @@
+{
+  "task_id": "planning_medium_001",
+  "category": "planning",
+  "difficulty": "medium",
+  "tags": ["long-horizon", "obstacle"],
+  "instruction": "根据地图规划机器人依次访问全部目标点；地图上有障碍格，移动到障碍格前需先清除",
+  "input": { "map": "world_03.json" },
+  "tools": ["scan", "move", "clear"],
+  "constraints": { "max_steps": 40, "max_time": 120 },
+  "ground_truth": { "targets": 10 }
+}

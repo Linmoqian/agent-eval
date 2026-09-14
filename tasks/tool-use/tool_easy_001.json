@@ -1,0 +1,11 @@
+{
+  "task_id": "tool_easy_001",
+  "category": "tool-use",
+  "difficulty": "easy",
+  "tags": ["state-manipulation"],
+  "instruction": "在键值存储中执行以下操作：将 user_count 写为 42，将 mode 写为 \"fast\"，最后用 list 列出全部键值确认",
+  "input": { "store": "kv", "initial": { "mode": "slow" } },
+  "tools": ["read", "write", "list"],
+  "constraints": { "max_steps": 10, "max_time": 60 },
+  "ground_truth": { "ops": 3, "state": { "user_count": 42, "mode": "fast" } }
+}

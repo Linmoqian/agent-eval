@@ -1,0 +1,11 @@
+{
+  "task_id": "reasoning_easy_001",
+  "category": "reasoning",
+  "difficulty": "easy",
+  "tags": ["arithmetic"],
+  "instruction": "一个房间里现在有 3 只猫和 2 只狗，随后又跑进来 4 只猫。请推理回答：房间里现在一共有多少只动物？",
+  "input": {},
+  "tools": [],
+  "constraints": { "max_steps": 3, "max_time": 30 },
+  "ground_truth": { "answer": 9 }
+}

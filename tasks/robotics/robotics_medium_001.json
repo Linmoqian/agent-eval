@@ -1,0 +1,11 @@
+{
+  "task_id": "robotics_medium_001",
+  "category": "robotics",
+  "difficulty": "medium",
+  "tags": ["execution", "obstacle"],
+  "instruction": "按以下坐标序列严格依次移动机器人：(1,1) → (3,1) → (4,2) → (2,6) → (0,8)。注意 (3,1) 是障碍格，移动到该格前必须先清除障碍，清除动作不影响访问顺序",
+  "input": { "map": "world_04.json" },
+  "tools": ["scan", "move", "clear"],
+  "constraints": { "max_steps": 15, "max_time": 60 },
+  "ground_truth": { "targets": 4 }
+}

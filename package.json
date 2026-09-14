@@ -10,6 +10,7 @@
     "demo": "node dist/runner/demo.js",
     "demo:experiment": "node dist/runner/demo_experiment.js",
     "demo:robustness": "node dist/runner/demo_robustness.js",
+    "demo:suite": "node dist/runner/demo_task_suite.js",
     "benchmark": "node dist/runner/cli.js"
   },
   "devDependencies": {

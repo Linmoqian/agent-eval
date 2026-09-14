@@ -1,0 +1,11 @@
+{
+  "task_id": "planning_easy_001",
+  "category": "planning",
+  "difficulty": "easy",
+  "tags": ["long-horizon"],
+  "instruction": "根据地图规划机器人依次访问全部目标点，地图无障碍，选择任意顺序完成即可",
+  "input": { "map": "world_02.json" },
+  "tools": ["scan", "move"],
+  "constraints": { "max_steps": 25, "max_time": 60 },
+  "ground_truth": { "targets": 6 }
+}

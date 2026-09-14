@@ -1,0 +1,11 @@
+{
+  "task_id": "robotics_easy_001",
+  "category": "robotics",
+  "difficulty": "easy",
+  "tags": ["execution"],
+  "instruction": "按以下坐标序列严格依次移动机器人：(1,1) → (3,3) → (5,7)，不允许调整顺序，完成后报告",
+  "input": { "map": "world_04.json" },
+  "tools": ["scan", "move"],
+  "constraints": { "max_steps": 10, "max_time": 60 },
+  "ground_truth": { "targets": 3 }
+}

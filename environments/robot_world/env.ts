@@ -3,6 +3,9 @@
 // @author: https://github.com/Linmoqian
 
 import world01 from "./world_01.json" with { type: "json" };
+import world02 from "./world_02.json" with { type: "json" };
+import world03 from "./world_03.json" with { type: "json" };
+import world04 from "./world_04.json" with { type: "json" };
 
 import type { Tool } from "../../core/tool.js";
 
@@ -51,7 +54,10 @@ export class RobotWorldEnv {
       obstacles: [...this.obstacles].map((k) => {
         const [x, y] = k.split(",").map(Number);
         return { x, y };
-      })
+      }),
+      // 统一进度协议（M8）：供 success / executionEfficiency 派生
+      progress_completed: this.done.size,
+      progress_total: this.map.targets.length
     };
   }
 
@@ -75,7 +81,10 @@ export class RobotWorldEnv {
       ok: true,
       position: this.position,
       completed_targets: this.done.size,
-      total_targets: this.map.targets.length
+      total_targets: this.map.targets.length,
+      // 统一进度协议（M8）：completed_targets 为兼容旧字段保留
+      progress_completed: this.done.size,
+      progress_total: this.map.targets.length
     };
   }
 
@@ -97,7 +106,10 @@ export class RobotWorldEnv {
 
 // 地图注册表：新地图在 json 落盘后于此登记，tsc 会将 import 的 json 一并 emit 到 dist
 const MAPS: Record<string, WorldMap> = {
-  world_01: world01 as WorldMap
+  world_01: world01 as WorldMap,
+  world_02: world02 as WorldMap,
+  world_03: world03 as WorldMap,
+  world_04: world04 as WorldMap
 };
 
 // 按地图名加载世界并产出工具集，benchmark 按任务 tools 列表过滤后注入 Agent

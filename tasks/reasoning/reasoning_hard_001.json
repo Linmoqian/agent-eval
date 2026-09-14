@@ -1,0 +1,11 @@
+{
+  "task_id": "reasoning_hard_001",
+  "category": "reasoning",
+  "difficulty": "hard",
+  "tags": ["logic", "arithmetic"],
+  "instruction": "五个兄弟姐妹的年龄依次相差 3 岁，其中最年长者今年 41 岁。请分步推理：最年轻者今年多少岁？",
+  "input": {},
+  "tools": [],
+  "constraints": { "max_steps": 3, "max_time": 30 },
+  "ground_truth": { "answer": 29 }
+}

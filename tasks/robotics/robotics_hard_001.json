@@ -1,0 +1,11 @@
+{
+  "task_id": "robotics_hard_001",
+  "category": "robotics",
+  "difficulty": "hard",
+  "tags": ["execution", "long-horizon", "tight-budget"],
+  "instruction": "严格按以下 14 个坐标的给定序列依次移动机器人，不允许调整顺序，且步数预算紧张，应避免任何多余动作：(1,1) → (4,2) → (7,3) → (10,4) → (13,5) → (2,6) → (5,7) → (8,8) → (11,9) → (3,3) → (6,5) → (9,6) → (12,1) → (0,8)",
+  "input": { "map": "world_04.json" },
+  "tools": ["scan", "move"],
+  "constraints": { "max_steps": 30, "max_time": 120 },
+  "ground_truth": { "targets": 14 }
+}

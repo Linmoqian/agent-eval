@@ -30,6 +30,7 @@ import { RobustnessEvaluator } from "../evaluators/robustness/robustness_evaluat
 import { resolveFaultProfile } from "../core/fault.js";
 import { wrapToolsWithFaults } from "../environments/fault_injector.js";
 import { createRobotWorldTools } from "../environments/robot_world/env.js";
+import { createKVTools } from "../environments/kv_store/env.js";
 
 // 项目根（dist/runner → 上一级两级），任务与结果目录都相对它定位
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -90,11 +91,19 @@ export function loadTask(taskId: string): Task {
   throw new Error(`任务不存在: ${taskId}（在 ${TASKS_DIR} 下未找到）`);
 }
 
-// 按任务类别装配工具环境：M1 仅 planning → robot_world；故障条件在环境侧包装实施
+// 按任务类别/输入装配工具环境：planning/robotics → robot_world，tool-use → kv_store；故障条件在环境侧包装实施
 function loadTools(task: Task, fault?: string): Tool[] {
   let tools: Tool[] = [];
-  if (task.category === "planning" && typeof task.input.map === "string") {
-    tools = createRobotWorldTools(task.input.map);
+  if (task.category === "planning" || task.category === "robotics") {
+    if (typeof task.input.map === "string") {
+      tools = createRobotWorldTools(task.input.map);
+    }
+  } else if (task.input.store === "kv") {
+    const initial =
+      typeof task.input.initial === "object" && task.input.initial !== null
+        ? (task.input.initial as Record<string, unknown>)
+        : {};
+    tools = createKVTools(initial);
   }
   if (fault !== undefined && fault !== "clean") {
     const resolved = resolveFaultProfile(fault);

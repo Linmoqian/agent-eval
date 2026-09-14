@@ -1,0 +1,11 @@
+{
+  "task_id": "tool_medium_001",
+  "category": "tool-use",
+  "difficulty": "medium",
+  "tags": ["state-manipulation", "read-modify-write"],
+  "instruction": "在键值存储中完成读改写链：先读出 counter 的当前值，将其翻倍后写回 counter，再读回确认结果；最后将 status 写为 \"done\"，并用 list 列出全部键值",
+  "input": { "store": "kv", "initial": { "counter": 21 } },
+  "tools": ["read", "write", "list"],
+  "constraints": { "max_steps": 15, "max_time": 60 },
+  "ground_truth": { "ops": 5, "state": { "counter": 42, "status": "done" } }
+}

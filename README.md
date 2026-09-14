@@ -7,10 +7,10 @@ Agent 评估框架（TypeScript）。
 - `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（判别联合事件 + 统一 `record()` 收集器）、`Evaluator`（Run 级 / Experiment 级双协议）、`ModelPricing`、`FaultConfig`（故障实验条件）
 - `agents/` Agent 实现：raw / tool-loop / react / plan-execute / planner-executor
 - `models/` 模型适配：openai-compatible（单一实现覆盖 openai/deepseek/glm/kimi/grok/gemini/qwen）+ local（离线剧本回放 ScriptedModel）
-- `tasks/` 任务集：planning / coding / tool-use / reasoning / robotics
-- `environments/` 任务环境：工具实现与地图数据（robot_world）+ `fault_injector`（M7 故障注入：环境侧包装工具，Agent 不感知）
+- `tasks/` 任务集（M8 套件）：planning / tool-use / reasoning / robotics 四类 × easy/medium/hard 各 3 题，含 difficulty / tags 元数据（robot_path_001 为 M1 legacy）
+- `environments/` 任务环境：robot_world（四张地图）+ kv_store（tool-use）+ `fault_injector`（M7 故障注入：环境侧包装工具，Agent 不感知）
 - `evaluators/` 评估器：success / efficiency / cost / behavior（Run 级：tool-usage / planning / errors）/ robustness（M7）+ stability（Experiment 级）
-- `runner/` 实验调度：`benchmark.ts`（单次）、`experiment.ts`（多 run 聚合）、`cli.ts`（矩阵调度）、离线验证脚本（`demo.ts` / `demo_experiment.ts` / `demo_robustness.ts`）
+- `runner/` 实验调度：`benchmark.ts`（单次）、`experiment.ts`（多 run 聚合）、`cli.ts`（矩阵调度）、离线验证脚本（`demo.ts` / `demo_experiment.ts` / `demo_robustness.ts` / `demo_task_suite.ts`）
 - `results/` 评估结果输出（不入库）
 
 ## 使用
@@ -22,6 +22,7 @@ npm run build
 npm run demo              # M2/M6：5 架构离线验证 + 行为对比表（零网络请求）
 npm run demo:experiment   # M4/M5：Experiment 聚合 + stability 离线验证
 npm run demo:robustness   # M7：故障注入 + 恢复率派生离线验证
+npm run demo:suite        # M8：四类×三难度 12 题套件离线验证
 npm run benchmark -- --tasks robot_path_001 --agents raw,react,planner-executor --models deepseek,openai --runs 3 --fault medium:42
 ```
 
@@ -42,13 +43,20 @@ results/experiments/exp_xxxx/
 
 ### Task：标准任务定义
 
-任务以 JSON 落盘于 `tasks/<category>/`，字段见示例 `tasks/planning/robot_path_001.json`：
+任务以 JSON 落盘于 `tasks/<category>/`，套件命名规范 `<category>_<difficulty>_<序号>`，字段见示例 `tasks/planning/planning_medium_001.json`：
 
-- `task_id` 唯一标识、`category` 类别、`instruction` 自然语言指令
-- `input` 任务输入、`tools` 允许的工具名列表
+- `task_id` 唯一标识、`category` 类别、`difficulty` 难度（easy/medium/hard）、`tags` 行为特征标签（long-horizon / replanning / execution / state-manipulation …）
+- `instruction` 自然语言指令
+- `input` 任务输入（地图 / KV 初值）、`tools` 允许的工具名列表
 - `constraints` 约束（`max_steps` / `max_time` 等）、`ground_truth` 期望结果
 
-加载时用 `validateTask(raw)` 校验并窄化为 `Task`，Agent 架构无论怎么变，都只拿到这一份任务。
+`ground_truth` 支持三种判定模式（success 评估器按模式裁决）：
+
+- `targets: N`：环境进度派生（robot_world 的观测携带 `progress_completed`，供 planning / robotics）
+- `state: { ... }`：状态快照比对（kv_store 的 list 观测携带 `state`，供 tool-use）
+- `answer: X`：终答匹配（数值宽松提取 / 字符串包含，供 reasoning）
+
+加载时用 `validateTask(raw)` 校验并窄化为 `Task`（difficulty 枚举 / tags 类型校验），Agent 架构无论怎么变，都只拿到这一份任务。任务维度切片示例（M10 统计分析的前置）：`ReAct 在 long-horizon 任务上有没有优势？`、`Planner-Executor 在 replanning 任务上有没有优势？`。
 
 ### Agent：统一架构协议
 
@@ -136,7 +144,7 @@ M4 Metrics System            ✅ success / efficiency / cost / stability + Model
 M5 Experiment Runner         ✅ cli 矩阵调度：tasks × agents × models × runs，exp 目录结构 + ArchitectureGain 列
 M6 Agent Behavior Metrics    ✅ tool-usage / planning / errors：从 Trace 派生 invalid / duplicate / planRevisions / planningOverhead
 M7 Fault Injection           ✅ FaultConfig 四旋钮 + clean/light/medium/heavy profile（种子化可复现）+ RobustnessEvaluator（RecoveryRate）
-M8 Task Suite                ⬜ 每类 easy/medium/hard + difficulty/tags 元数据
+M8 Task Suite                ✅ 四类 × 三难度 12 题 + difficulty/tags 元数据 + kv_store 环境 + 三模式 success 判定 + ExecutionEfficiency
 M9 Real-Model Experiments    ⬜ 小矩阵起步（3 模型 × 5 架构 × 3 任务 × 10 runs）+ 固定 ExperimentConfig + Budget/Capability 双模式
 M10 Statistical Analysis     ⬜ ArchitectureGain × ModelCapability 统计检验（模型越强，架构还重要吗）
 M11 Visualization / Report   ⬜ 增益矩阵与趋势可视化
@@ -170,4 +178,18 @@ npm run benchmark -- --tasks robot_path_001 --agents tool-loop,planner-executor 
 ```
 
 离线验证：`npm run demo:robustness`（注入确定性、恢复率派生、集成链路，零网络）。
+
+## 任务套件与多环境（M8）
+
+四类 × 三难度共 12 题（`npm run demo:suite` 离线验证）：
+
+```text
+planning/   planning_{easy,medium,hard}_001    自主规划访问全部目标点（world_02/03/04 三张地图，障碍递增）
+tool-use/   tool_{easy,medium,hard}_001        KV 存储读写链（read/write/erase/list，state 快照判定）
+reasoning/  reasoning_{easy,medium,hard}_001   纯推理无工具（answer 匹配判定，raw 架构也有用武之地）
+robotics/   robotics_{easy,medium,hard}_001    严格按给定序列执行（忠实度 + 障碍处理 + 步数紧预算）
+```
+
+统一进度协议：环境观测携带 `progress_completed`（robot_world 同时保留 `completed_targets` 兼容字段），ExecutionEfficiency = TaskProgress / ToolCalls 由 efficiency 评估器派生（无进度观测或无工具调用时为 null）。新环境只需遵守观测协议即可被全部评估器覆盖（kv_store 已验证，故障注入同样自动泛化）。
+
 真实模型：在 `.env` 填入对应厂商 key 后 `npm run benchmark -- --models deepseek --runs 3`。

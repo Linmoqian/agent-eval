@@ -1,0 +1,11 @@
+{
+  "task_id": "reasoning_medium_001",
+  "category": "reasoning",
+  "difficulty": "medium",
+  "tags": ["logic"],
+  "instruction": "已知前提：所有玫瑰都是花；有些花很快凋谢。请严谨推理：从这两个前提出发，能否必然推出「有些玫瑰很快凋谢」？只回答「能」或「不能」，并简要说明理由",
+  "input": {},
+  "tools": [],
+  "constraints": { "max_steps": 3, "max_time": 30 },
+  "ground_truth": { "answer": "不能" }
+}
