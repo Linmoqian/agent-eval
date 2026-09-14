@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Agent } from "../core/agent.js";
-import type { EvaluationResult } from "../core/evaluator.js";
+import type { Evaluator, EvaluationResult } from "../core/evaluator.js";
 import type { Model } from "../core/model.js";
 import { validateTask, type Task, type Tool } from "../core/index.js";
 import type { Trace } from "../core/trace.js";
@@ -19,8 +19,10 @@ import { ToolLoopAgent } from "../agents/tool-loop/tool_loop_agent.js";
 import { ReactAgent } from "../agents/react/react_agent.js";
 import { PlanExecuteAgent } from "../agents/plan-execute/plan_execute_agent.js";
 import { PlannerExecutorAgent } from "../agents/planner-executor/planner_executor_agent.js";
-import { OpenAIModel } from "../models/openai/openai_model.js";
+import { createCompatibleModel, listProviders } from "../models/openai-compatible/openai_compatible.js";
 import { SuccessEvaluator } from "../evaluators/success/success_evaluator.js";
+import { EfficiencyEvaluator } from "../evaluators/efficiency/efficiency_evaluator.js";
+import { CostEvaluator } from "../evaluators/cost/cost_evaluator.js";
 import { createRobotWorldTools } from "../environments/robot_world/env.js";
 
 // 项目根（dist/runner → 上一级两级），任务与结果目录都相对它定位
@@ -36,10 +38,10 @@ export interface BenchmarkOptions {
   agent: string;
   // 架构自定义参数（如 planner-executor 的 plannerModel），透传给 agent.init
   agentOptions?: Record<string, unknown>;
-  // 模型："openai" 走真实适配器；或直接传入 Model 实例（如 ScriptedModel）
+  // 模型：厂商 id（如 "openai"/"deepseek"/"glm"）或 "provider:model"，也可直接传 Model 实例
   model: string | Model;
-  // 结果落盘目录，默认 results/
-  outDir?: string;
+  // 结果落盘目录，默认 results/；传 null 不落盘（实验调度器自行组织目录）
+  outDir?: string | null;
 }
 
 // 单次实验报告
@@ -61,7 +63,8 @@ export interface BenchmarkReport {
     toolCalls: number;
     steps: number;
   };
-  evaluation: EvaluationResult;
+  // Run 级评估结果（success / efficiency / cost …）
+  evaluations: EvaluationResult[];
   trace: Trace;
 }
 
@@ -88,6 +91,14 @@ function loadTools(task: Task): Tool[] {
 }
 
 // 架构注册表：新增架构只需在此登记
+export const AGENT_IDS = [
+  "raw",
+  "tool-loop",
+  "react",
+  "plan-execute",
+  "planner-executor"
+] as const;
+
 function resolveAgent(name: string): Agent {
   switch (name) {
     case "raw":
@@ -101,19 +112,25 @@ function resolveAgent(name: string): Agent {
     case "planner-executor":
       return new PlannerExecutorAgent();
     default:
-      throw new Error(`未注册的 Agent 架构: ${name}`);
+      throw new Error(`未注册的 Agent 架构: ${name}（可用: ${AGENT_IDS.join(", ")}）`);
   }
 }
 
-// 模型解析："openai" 走真实适配器，其余须传实例
+// 模型解析：厂商 id / "provider:model" 走兼容适配器，其余须传实例
 function resolveModel(model: string | Model): { provider: string; instance: Model } {
   if (typeof model !== "string") {
     return { provider: "instance", instance: model };
   }
-  if (model === "openai") {
-    return { provider: "openai", instance: new OpenAIModel() };
+  const sep = model.indexOf(":");
+  const providerId = sep === -1 ? model : model.slice(0, sep);
+  const modelOverride = sep === -1 ? undefined : model.slice(sep + 1);
+  try {
+    const instance = createCompatibleModel(providerId, modelOverride);
+    return { provider: providerId, instance };
+  } catch (err) {
+    // 非注册厂商且非实例：给出可用列表
+    throw new Error(`${String(err)}；也可直接传入 Model 实例（可用厂商: ${listProviders().join(", ")}）`);
   }
-  throw new Error(`未注册的模型: ${model}`);
 }
 
 // 从 Trace 派生指标：观测层是唯一事实来源
@@ -138,8 +155,16 @@ function deriveMetrics(report: Omit<BenchmarkReport, "metrics">): BenchmarkRepor
   };
 }
 
+// 默认 Run 级评估器链：success 裁决 + efficiency/cost 观测
+function defaultEvaluators(): Evaluator[] {
+  return [new SuccessEvaluator(), new EfficiencyEvaluator(), new CostEvaluator()];
+}
+
 // 单次完整评估：Agent 负责完成任务，Evaluator 负责评价任务，二者彻底解耦
-export async function benchmark(options: BenchmarkOptions): Promise<BenchmarkReport> {
+export async function benchmark(
+  options: BenchmarkOptions,
+  evaluators: Evaluator[] = defaultEvaluators()
+): Promise<BenchmarkReport> {
   // 统一加载项目根 .env（显式环境变量优先），确保真实模型调用能拿到 key
   loadEnvFile(path.join(PROJECT_ROOT, ".env"));
 
@@ -153,8 +178,12 @@ export async function benchmark(options: BenchmarkOptions): Promise<BenchmarkRep
 
   const result = await agent.run(task);
 
-  const evaluator = new SuccessEvaluator();
-  const evaluation = await evaluator.evaluate({ task, result, trace: result.trace });
+  const evaluations: EvaluationResult[] = [];
+  for (const evaluator of evaluators) {
+    evaluations.push(
+      await evaluator.evaluate({ task, result, trace: result.trace, modelName: model.name })
+    );
+  }
 
   const partial: Omit<BenchmarkReport, "metrics"> = {
     runId: `run_${randomUUID().slice(0, 8)}`,
@@ -166,18 +195,20 @@ export async function benchmark(options: BenchmarkOptions): Promise<BenchmarkRep
       finalAnswer: result.finalAnswer,
       error: result.error
     },
-    evaluation,
+    evaluations,
     trace: result.trace
   };
 
   const report: BenchmarkReport = { ...partial, metrics: deriveMetrics(partial) };
 
-  // 结果落盘（results/ 不入库）
-  const outDir = options.outDir ?? RESULTS_DIR;
-  mkdirSync(outDir, { recursive: true });
-  const outFile = path.join(outDir, `${report.runId}.json`);
-  writeFileSync(outFile, JSON.stringify(report, null, 2), "utf-8");
-  console.log(`结果已写入 ${outFile}`);
+  // 结果落盘（results/ 不入库）；outDir 为 null 时不落盘，由调用方自行组织
+  if (options.outDir !== null) {
+    const outDir = options.outDir ?? RESULTS_DIR;
+    mkdirSync(outDir, { recursive: true });
+    const outFile = path.join(outDir, `${report.runId}.json`);
+    writeFileSync(outFile, JSON.stringify(report, null, 2), "utf-8");
+    console.log(`结果已写入 ${outFile}`);
+  }
 
   return report;
 }

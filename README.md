@@ -4,13 +4,13 @@ Agent 评估框架（TypeScript）。
 
 ## 目录结构
 
-- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（判别联合事件 + 统一 `record()` 收集器）、`Evaluator`
+- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（判别联合事件 + 统一 `record()` 收集器）、`Evaluator`（Run 级 / Experiment 级双协议）、`ModelPricing`
 - `agents/` Agent 实现：raw / tool-loop / react / plan-execute / planner-executor
-- `models/` 模型适配：openai / anthropic / gemini / qwen / local（含离线剧本回放 ScriptedModel）
+- `models/` 模型适配：openai-compatible（单一实现覆盖 openai/deepseek/glm/kimi/grok/gemini/qwen）+ local（离线剧本回放 ScriptedModel）
 - `tasks/` 任务集：planning / coding / tool-use / reasoning / robotics
 - `environments/` 任务环境：工具实现与地图数据（M1：robot_world）
-- `evaluators/` 评估器：success / efficiency / robustness / cost / stability
-- `runner/` 批量评估入口（`benchmark.ts`）与链路验证脚本（`demo.ts`）
+- `evaluators/` 评估器：success / efficiency / cost（Run 级）+ stability（Experiment 级）
+- `runner/` 实验调度：`benchmark.ts`（单次）、`experiment.ts`（多 run 聚合）、`cli.ts`（矩阵调度）、离线验证脚本（`demo.ts` / `demo_experiment.ts`）
 - `results/` 评估结果输出（不入库）
 
 ## 使用
@@ -18,8 +18,22 @@ Agent 评估框架（TypeScript）。
 ```bash
 npm install
 npm run typecheck
-npm run build && npm run demo   # 离线跑通 M1 全链路（零网络请求）
+npm run build
+npm run demo              # M2：5 架构离线验证（零网络请求）
+npm run demo:experiment   # M4/M5：Experiment 聚合 + stability 离线验证
+npm run benchmark -- --tasks robot_path_001 --agents raw,react,planner-executor --models deepseek,openai --runs 3
 ```
+
+实验矩阵目录（Experiment 是一级对象）：
+
+```text
+results/experiments/exp_xxxx/
+  config.json      实验配置（task × agent × model × runs）
+  summary.json     stability 聚合 + 各 run 摘要
+  runs/run_001.json …  全量单次报告（含完整 Trace）
+```
+
+模型为厂商 id（`openai`/`deepseek`/`zhipu`/`glm`/`moonshot`/`kimi`/`grok`/`gemini`/`qwen`）或 `provider:model` 覆盖形式（如 `zhipu:glm-4.5-air`）；key 从 `.env` 读（见 `.env.example`）。
 
 ## 核心接口（统一输入协议）
 
@@ -55,14 +69,23 @@ interface Agent {
 `core/model.ts`，各厂商适配器实现 `generate(messages, options?)`，返回统一的 `ModelResponse`（`content` / `toolCalls` / `usage` / `finishReason`）。换模型只需换适配器实例：
 
 ```ts
-const agent = new ReactAgent({ model: new QwenModel("qwen-max") })
+const agent = new ReactAgent({ model: createCompatibleModel("deepseek") })
 ```
+
+兼容厂商（openai/deepseek/glm/kimi/grok/gemini/qwen）共用 `models/openai-compatible/` 的单一实现，`{ baseUrl, apiKey, model }` 三元组切换；协议差异明显的（anthropic 原生 API 等）后续单独 adapter。
 
 辅助类型：`Message` / `TokenUsage`（`model.ts`）、`ToolSpec` / `Tool` / `ToolCall`（`tool.ts`）、`TraceStep` / `Trace`（`trace.ts`），统一从 `core/index.ts` 导出。
 
-## 评估解耦原则
+## 评估分层：Run 与 Experiment
 
-**Agent 负责完成任务，Evaluator 负责评价任务**，二者只通过 `EvaluationContext` 交互：
+**Agent 负责完成任务，Evaluator 负责评价任务**，二者只通过上下文交互：
+
+- Run 级（单次执行）：`Evaluator` 实现 `evaluate(context: EvaluationContext)`，输入 Task / Result / Trace，产出 `EvaluationResult[]`（success 裁决 + efficiency / cost 观测）
+- Experiment 级（多次重复）：`ExperimentEvaluator` 实现 `evaluate(context: ExperimentContext)`，输入轻量 `RunSummary[]`，如 `StabilityEvaluator`
+
+$$stability = f(run_1, run_2, \ldots, run_n)$$
+
+成本价格独立于推理行为，维护在 `core/pricing.ts`（`ModelPricing`）。
 
 ```ts
 interface EvaluationContext {
@@ -107,14 +130,14 @@ trace.record({ kind: "tool_result", callId, name, observation, ok });
 M0 Core Protocol        ✅
 M1 Minimal Benchmark    ✅ robot_path_001 × {raw, tool-loop} × {openai, scripted} × success
 M2 Agent Architectures  ✅ raw / tool-loop / react / plan-execute / planner-executor × 统一 Trace 事件
-M3 Model Adapters       ⬜ openai-compatible 矩阵（deepseek/glm/kimi/grok）+ anthropic / gemini / local
-M4 Metrics & Experiment ⬜ efficiency / cost / stability + Experiment 聚合层
-M5 Batch Runner         ⬜ tasks × agents × models × runs 实验调度器
+M3 Model Adapters       ✅ openai-compatible 单一实现覆盖 7 家兼容厂商（anthropic 原生 API 待补）
+M4 Metrics & Experiment ✅ success / efficiency / cost / stability + ModelPricing + Experiment 聚合层
+M5 Batch Runner         ✅ cli 矩阵调度：tasks × agents × models × runs，exp 目录结构 + ArchitectureGain 列
 M6 Behavior Metrics     ⬜ tool_error_rate / redundancy / plan_revision_count / recovery
 M7 Robustness           ⬜ FaultInjector（工具超时/异常/噪声观测）+ recovery_rate
 M8 Task Suite           ⬜ 每 category easy/medium/hard
 M9 Stats & Viz          ⬜ 统计检验、ArchitectureGain × ModelGain 矩阵可视化
 ```
 
-M2 验证方式：`npm run build && npm run demo`（5 架构离线剧本验证，详见 `runner/README.md`）。
-接入真实模型：设 `OPENAI_API_KEY`（可选 `OPENAI_MODEL`），`benchmark({ ..., model: "openai" })`。
+离线验证：`npm run demo`（M2）、`npm run demo:experiment`（M4/M5），均零网络请求。
+真实模型：在 `.env` 填入对应厂商 key 后 `npm run benchmark -- --models deepseek --runs 3`。

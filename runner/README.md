@@ -1,29 +1,33 @@
-# M2 架构矩阵验证脚本（离线）
+# runner：实验调度层
 
-`demo.ts`：用剧本回放模型（ScriptedModel，零网络请求）让**同一个任务（robot_path_001）被 5 种架构完整运行**，行为全部进入统一 Trace：
-
+```text
+benchmark.ts        单次运行：Task → Agent → Model → Trace → Run 级评估器 → 报告
+experiment.ts       实验调度：Task × Agent × Model × runs → Experiment（stability 聚合 + 目录落盘）
+cli.ts              矩阵 CLI：全组合调度 + 汇总表 + ArchitectureGain 列
+scripts.ts          robot_path_001 的 5 架构离线剧本构造器
+demo.ts             M2 离线验证：5 架构 × 统一 Trace
+demo_experiment.ts  M4/M5 离线验证：Experiment 聚合 + 三评估器 + exp 目录
 ```
-Task → Agent → Model → Trace → Evaluator → Result
-```
 
-运行：
+## 使用
 
 ```bash
-npm run build && npm run demo
+npm run demo              # M2 离线验证（零网络）
+npm run demo:experiment   # M4/M5 离线验证（零网络）
+npm run benchmark -- --tasks robot_path_001 --agents raw,react --models deepseek,openai --runs 3
 ```
 
-预期对照结果（评估器与 Agent 解耦的价值所在）：
+## Run 与 Experiment
 
-| Agent | Agent 自报 success | SuccessEvaluator passed | 结构差异（事件分布） |
-|---|---|---|---|
-| raw | true | **false**（完成 0/8） | 仅 model_call/response 各 1 |
-| tool-loop | true | **true**（8/8） | 无 thought、可并行多工具 |
-| react | true | **true**（8/8） | 每轮 1 条 thought、单动作串行 |
-| plan-execute | true | **true**（8/8） | plan_created ×1、无计划修订 |
-| planner-executor | true | **true**（8/8） | 失败观测 → replanning → plan_updated(revised) |
+```text
+Run         = benchmark()：一次任务执行 + Run 级评估（success/efficiency/cost）
+Experiment  = runExperiment()：同一 Task×Agent×Model 重复 runs 次
+              → RunSummary 聚合 → StabilityEvaluator（Experiment 级）
+              → results/experiments/exp_xxxx/{config.json, summary.json, runs/run_001.json…}
+```
 
-planner-executor 的剧本特意安排：Planner 初版计划把障碍格 (4,2) 当途经点 → Executor move 失败 → 回 Planner 重规划 → 修正后完成任务，用于验证「失败上抛 + 计划修订」结构（M7 恢复能力的基础）。
+CLI 汇总表按 task × agent × model 输出 `successRate / latencyMeanMs / tokensMean / archGain`；`archGain = Score(M,A,T) − Score(M,Raw,T)`（同任务同模型下相对 raw 基线的成功率增益，无基线时为 `-`）。
 
-demo 同时断言：5 架构 trace 完整（含 model_call/model_response）、事件形态与架构预期一致。
+## 单实验失败不中断矩阵
 
-接入真实模型：设置 `OPENAI_API_KEY`（可选 `OPENAI_MODEL`），将 `model` 换成 `model: "openai"` 即可，其余链路不变。
+CLI 对每个实验 try/catch：网络错误、预算耗尽等只记录为失败行，退出码 1，其余实验继续。厂商 key 缺失在循环前统一校验，提前失败。

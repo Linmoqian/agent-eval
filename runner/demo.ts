@@ -6,97 +6,14 @@
 import type { Trace } from "../core/trace.js";
 
 import { benchmark, type BenchmarkReport } from "./benchmark.js";
+import { ScriptedModel } from "../models/local/scripted_model.js";
 import {
-  ScriptedModel,
-  scriptedToolCall,
-  type ScriptedResponse
-} from "../models/local/scripted_model.js";
-
-// robot_path_001 的 8 个目标点
-const TARGETS: [number, number][] = [
-  [2, 1], [5, 3], [1, 6], [7, 7],
-  [9, 2], [4, 8], [6, 5], [8, 9]
-];
-
-// ===== raw 剧本：无工具，模型只能给文本答案（对照组）=====
-function buildRawScript(): ScriptedResponse[] {
-  return [{ content: "根据地图，应该依次访问 8 个目标点（规划建议，未实际执行）。" }];
-}
-
-// ===== tool-loop 剧本：无显式推理，首轮并行调用两个工具 =====
-function buildToolLoopScript(): ScriptedResponse[] {
-  return [
-    { toolCalls: [scriptedToolCall("scan", {}), scriptedToolCall("clear", { x: 4, y: 2 })] },
-    ...TARGETS.map(([x, y]) => ({ toolCalls: [scriptedToolCall("move", { x, y })] })),
-    { content: "已扫描地图、清除障碍并依次到达全部 8 个目标点，任务完成。" }
-  ];
-}
-
-// ===== react 剧本：每轮 Thought 文本 + 恰好一个 Action =====
-function buildReactScript(): ScriptedResponse[] {
-  const script: ScriptedResponse[] = [
-    {
-      content: "Thought: 8 个目标点分布分散，先扫描确认地图布局与障碍。",
-      toolCalls: [scriptedToolCall("scan", {})]
-    },
-    {
-      content: "Thought: 障碍 (4,2) 在规划路径附近，先清除以防移动受阻。",
-      toolCalls: [scriptedToolCall("clear", { x: 4, y: 2 })]
-    }
-  ];
-  for (const [x, y] of TARGETS) {
-    script.push({
-      content: `Thought: 前往目标点 (${x},${y})，移动后即可标记完成。`,
-      toolCalls: [scriptedToolCall("move", { x, y })]
-    });
-  }
-  script.push({ content: "Thought: 全部 8 个目标点已到达，任务完成，输出总结。" });
-  return script;
-}
-
-// ===== plan-execute 剧本：planning 出 JSON 计划 → 逐步执行（toolCall + DONE）→ 总结 =====
-function buildPlanExecuteScript(): ScriptedResponse[] {
-  const plan = JSON.stringify([
-    "扫描地图获取机器人位置与目标状态",
-    ...TARGETS.map(([x, y]) => `移动到目标点 (${x},${y})`)
-  ]);
-  const script: ScriptedResponse[] = [{ content: plan }];
-  script.push({ toolCalls: [scriptedToolCall("scan", {})] });
-  script.push({ content: "DONE" });
-  for (const [x, y] of TARGETS) {
-    script.push({ toolCalls: [scriptedToolCall("move", { x, y })] });
-    script.push({ content: "DONE" });
-  }
-  script.push({ content: "计划全部步骤执行完毕，8 个目标点均已到达，任务完成。" });
-  return script;
-}
-
-// ===== planner-executor 剧本：planner 与 executor 各自独立回放 =====
-// planner 初版计划把障碍格 (4,2) 当途经点 → executor move 失败 → 回 planner 重规划 → 修正后完成
-function buildPlannerScripts(): { planner: ScriptedResponse[]; executor: ScriptedResponse[] } {
-  const planner: ScriptedResponse[] = [
-    {
-      content: JSON.stringify([
-        "扫描地图获取机器人位置与目标状态",
-        "途经 (4,2) 并移动到该格",
-        ...TARGETS.map(([x, y]) => `移动到目标点 (${x},${y})`)
-      ])
-    },
-    {
-      content: JSON.stringify(TARGETS.map(([x, y]) => `移动到目标点 (${x},${y})`))
-    }
-  ];
-  const executor: ScriptedResponse[] = [];
-  executor.push({ toolCalls: [scriptedToolCall("scan", {})] });
-  executor.push({ content: "DONE" });
-  executor.push({ toolCalls: [scriptedToolCall("move", { x: 4, y: 2 })] }); // 将观测到 obstacle 失败
-  for (const [x, y] of TARGETS) {
-    executor.push({ toolCalls: [scriptedToolCall("move", { x, y })] });
-    executor.push({ content: "DONE" });
-  }
-  executor.push({ content: "修订计划执行完毕，8 个目标点全部到达，任务完成。" });
-  return { planner, executor };
-}
+  buildRawScript,
+  buildToolLoopScript,
+  buildReactScript,
+  buildPlanExecuteScript,
+  buildPlannerScripts
+} from "./scripts.js";
 
 // 统计事件类型分布，直观展示各架构的结构差异
 function eventKindCounts(trace: Trace): Record<string, number> {
@@ -115,13 +32,22 @@ function printReport(title: string, r: BenchmarkReport): void {
   console.log(`agent        : ${r.agent.name}`);
   console.log(`model        : ${r.model.provider}/${r.model.name}`);
   console.log(`agent 自报   : success=${r.result.success}`);
-  console.log(
-    `evaluator    : passed=${r.evaluation.passed} score=${r.evaluation.score.toFixed(2)} details=${JSON.stringify(r.evaluation.details)}`
-  );
+  for (const e of r.evaluations) {
+    console.log(
+      `evaluator    : ${e.evaluator} passed=${e.passed} score=${e.score.toFixed(2)} details=${JSON.stringify(e.details)}`
+    );
+  }
   console.log(
     `metrics      : ${r.metrics.steps} steps, ${r.metrics.toolCalls} toolCalls, ${r.metrics.inputTokens}+${r.metrics.outputTokens} tokens, ${r.metrics.durationMs}ms`
   );
   console.log(`events       : ${JSON.stringify(eventKindCounts(r.trace))}`);
+}
+
+// 按名取 Run 级评估结果
+function evaluationOf(r: BenchmarkReport, name: string): { passed: boolean; score: number; details: unknown } {
+  const found = r.evaluations.find((e) => e.evaluator === name);
+  if (found === undefined) throw new Error(`${r.agent.name}: 缺少 ${name} 评估结果`);
+  return { passed: found.passed, score: found.score, details: found.details };
 }
 
 // 断言收集器：失败信息汇总后统一判定
@@ -191,9 +117,12 @@ async function main(): Promise<void> {
   console.log("\n===== 结论 =====");
 
   // 完成度：4 个工具架构必须通过，raw 不通过
-  expect(!rawReport.evaluation.passed, "raw 基线不应通过（对照组）");
+  expect(!evaluationOf(rawReport, "success").passed, "raw 基线不应通过（对照组）");
   for (const r of [loopReport, reactReport, planReport, peReport]) {
-    expect(r.evaluation.passed, `${r.agent.name}: 评估器应判通过，实际 ${JSON.stringify(r.evaluation.details)}`);
+    expect(
+      evaluationOf(r, "success").passed,
+      `${r.agent.name}: 评估器应判通过，实际 ${JSON.stringify(evaluationOf(r, "success").details)}`
+    );
     expectTraceIntegrity(r);
   }
   expectTraceIntegrity(rawReport);
@@ -227,7 +156,7 @@ async function main(): Promise<void> {
   expect(peRevised === 1, `planner-executor: 应有 1 次计划修订，实际 ${peRevised}`);
   expect(peReplanning === 1, `planner-executor: 应有 1 次 replanning 状态，实际 ${peReplanning}`);
   expect(peFailedObs === 1, `planner-executor: 应有 1 次失败观测，实际 ${peFailedObs}`);
-  expect(peReport.evaluation.passed, "planner-executor: 重规划后应完成任务");
+  expect(evaluationOf(peReport, "success").passed, "planner-executor: 重规划后应完成任务");
 
   if (failures.length === 0) {
     console.log("✅ M2 验证通过：5 架构完整运行，行为全部进入统一 Trace，结构差异可在事件流中观测。");

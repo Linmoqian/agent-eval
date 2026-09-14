@@ -34,6 +34,11 @@ export class ScriptedModel implements Model {
     return this.cursor;
   }
 
+  // 重置回放游标：实验调度器多次复用同一实例前调用（协议外扩展，幂等安全）
+  reset(): void {
+    this.cursor = 0;
+  }
+
   async generate(_messages: Message[], _options?: GenerateOptions): Promise<ModelResponse> {
     void _messages;
     void _options;
