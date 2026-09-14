@@ -4,13 +4,13 @@ Agent 评估框架（TypeScript）。
 
 ## 目录结构
 
-- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（判别联合事件 + 统一 `record()` 收集器）、`Evaluator`（Run 级 / Experiment 级双协议）、`ModelPricing`
+- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（判别联合事件 + 统一 `record()` 收集器）、`Evaluator`（Run 级 / Experiment 级双协议）、`ModelPricing`、`FaultConfig`（故障实验条件）
 - `agents/` Agent 实现：raw / tool-loop / react / plan-execute / planner-executor
 - `models/` 模型适配：openai-compatible（单一实现覆盖 openai/deepseek/glm/kimi/grok/gemini/qwen）+ local（离线剧本回放 ScriptedModel）
 - `tasks/` 任务集：planning / coding / tool-use / reasoning / robotics
-- `environments/` 任务环境：工具实现与地图数据（M1：robot_world）
-- `evaluators/` 评估器：success / efficiency / cost / behavior（Run 级：tool-usage / planning / errors）+ stability（Experiment 级）
-- `runner/` 实验调度：`benchmark.ts`（单次）、`experiment.ts`（多 run 聚合）、`cli.ts`（矩阵调度）、离线验证脚本（`demo.ts` / `demo_experiment.ts`）
+- `environments/` 任务环境：工具实现与地图数据（robot_world）+ `fault_injector`（M7 故障注入：环境侧包装工具，Agent 不感知）
+- `evaluators/` 评估器：success / efficiency / cost / behavior（Run 级：tool-usage / planning / errors）/ robustness（M7）+ stability（Experiment 级）
+- `runner/` 实验调度：`benchmark.ts`（单次）、`experiment.ts`（多 run 聚合）、`cli.ts`（矩阵调度）、离线验证脚本（`demo.ts` / `demo_experiment.ts` / `demo_robustness.ts`）
 - `results/` 评估结果输出（不入库）
 
 ## 使用
@@ -19,9 +19,10 @@ Agent 评估框架（TypeScript）。
 npm install
 npm run typecheck
 npm run build
-npm run demo              # M2：5 架构离线验证（零网络请求）
+npm run demo              # M2/M6：5 架构离线验证 + 行为对比表（零网络请求）
 npm run demo:experiment   # M4/M5：Experiment 聚合 + stability 离线验证
-npm run benchmark -- --tasks robot_path_001 --agents raw,react,planner-executor --models deepseek,openai --runs 3
+npm run demo:robustness   # M7：故障注入 + 恢复率派生离线验证
+npm run benchmark -- --tasks robot_path_001 --agents raw,react,planner-executor --models deepseek,openai --runs 3 --fault medium:42
 ```
 
 实验矩阵目录（Experiment 是一级对象）：
@@ -134,7 +135,7 @@ M3 Model Adapter Matrix      ✅ openai-compatible 单一实现覆盖 7 家兼�
 M4 Metrics System            ✅ success / efficiency / cost / stability + ModelPricing
 M5 Experiment Runner         ✅ cli 矩阵调度：tasks × agents × models × runs，exp 目录结构 + ArchitectureGain 列
 M6 Agent Behavior Metrics    ✅ tool-usage / planning / errors：从 Trace 派生 invalid / duplicate / planRevisions / planningOverhead
-M7 Fault Injection           ⬜ FaultConfig（toolFailureRate / observationNoise 等）+ clean/light/medium/heavy profile + RecoveryRate
+M7 Fault Injection           ✅ FaultConfig 四旋钮 + clean/light/medium/heavy profile（种子化可复现）+ RobustnessEvaluator（RecoveryRate）
 M8 Task Suite                ⬜ 每类 easy/medium/hard + difficulty/tags 元数据
 M9 Real-Model Experiments    ⬜ 小矩阵起步（3 模型 × 5 架构 × 3 任务 × 10 runs）+ 固定 ExperimentConfig + Budget/Capability 双模式
 M10 Statistical Analysis     ⬜ ArchitectureGain × ModelCapability 统计检验（模型越强，架构还重要吗）
@@ -155,5 +156,18 @@ errors / fatalErrors
 ```
 
 `npm run demo` 末尾输出架构行为对比表：都成功的架构，成功方式各不相同（tool-loop 盲循环重复、planner-executor 失败重规划恢复）。ExecutionEfficiency（TaskProgress / ToolCalls）依赖任务进度元数据，待 M8 接入。
-离线验证：`npm run demo`（M2）、`npm run demo:experiment`（M4/M5），均零网络请求。
+
+## 故障注入与鲁棒性（M7）
+
+鲁棒性首先是实验条件：`core/fault.ts` 定义四旋钮（`toolFailureRate` / `toolTimeoutRate` / `observationDropRate` / `observationNoiseRate`）与固定 profile，`environments/fault_injector.ts` 在环境侧包装工具实施（mulberry32 种子化，同种子同调用序列 → 同故障序列，可复现）；`RobustnessEvaluator` 只从 Trace 观察：
+
+$$RecoveryRate = \frac{RecoveredFaults}{InjectedFaults}$$
+
+恢复取保守口径（故障后同指纹重试成功）；换策略后成功不计入，由 success 与故障条件下的成功率观察。注入的故障在观测 JSON 中携带 `fault: { type, injected: true }` 标记，Trace 仍是评估的唯一事实来源。CLI 用 `--fault <profile[:seed]>` 指定（缺省 clean），experiment 的 `config.json` 会记录故障条件：
+
+```bash
+npm run benchmark -- --tasks robot_path_001 --agents tool-loop,planner-executor --models deepseek --runs 10 --fault heavy:42
+```
+
+离线验证：`npm run demo:robustness`（注入确定性、恢复率派生、集成链路，零网络）。
 真实模型：在 `.env` 填入对应厂商 key 后 `npm run benchmark -- --models deepseek --runs 3`。

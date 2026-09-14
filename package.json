@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "demo": "node dist/runner/demo.js",
     "demo:experiment": "node dist/runner/demo_experiment.js",
+    "demo:robustness": "node dist/runner/demo_robustness.js",
     "benchmark": "node dist/runner/cli.js"
   },
   "devDependencies": {

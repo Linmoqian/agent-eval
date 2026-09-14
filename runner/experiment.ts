@@ -26,6 +26,8 @@ export interface ExperimentOptions {
   model: string | Model;
   // 重复运行次数
   runs: number;
+  // 故障注入实验条件（M7）：profile 名或 "profile:seed"，缺省 clean
+  fault?: string;
   // 架构自定义参数
   agentOptions?: Record<string, unknown>;
   // Run 级评估器链（缺省 success + efficiency + cost）
@@ -44,6 +46,8 @@ export interface ExperimentReport {
     model: string;
     modelProvider: string;
     runs: number;
+    // 故障注入条件（缺省 clean）
+    fault?: string;
     createdAt: string;
   };
   // 各 run 的成功评估结果（success 评估器视角）
@@ -83,6 +87,8 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
     agent: options.agent,
     model: options.model,
     agentOptions: options.agentOptions,
+    // 故障条件随实验传递
+    fault: options.fault,
     // 单次结果由本调度器统一落盘到实验目录
     outDir: null
   };
@@ -133,6 +139,7 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
       model: modelDesc,
       modelProvider: reports[0]?.model.provider ?? "unknown",
       runs: options.runs,
+      fault: options.fault ?? "clean",
       createdAt: new Date().toISOString()
     },
     summary: { stability, runSummaries },

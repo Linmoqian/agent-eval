@@ -26,6 +26,9 @@ import { CostEvaluator } from "../evaluators/cost/cost_evaluator.js";
 import { ToolUsageEvaluator } from "../evaluators/behavior/tool_usage.js";
 import { PlanningEvaluator } from "../evaluators/behavior/planning.js";
 import { ErrorsEvaluator } from "../evaluators/behavior/errors.js";
+import { RobustnessEvaluator } from "../evaluators/robustness/robustness_evaluator.js";
+import { resolveFaultProfile } from "../core/fault.js";
+import { wrapToolsWithFaults } from "../environments/fault_injector.js";
 import { createRobotWorldTools } from "../environments/robot_world/env.js";
 
 // 项目根（dist/runner → 上一级两级），任务与结果目录都相对它定位
@@ -45,6 +48,8 @@ export interface BenchmarkOptions {
   model: string | Model;
   // 结果落盘目录，默认 results/；传 null 不落盘（实验调度器自行组织目录）
   outDir?: string | null;
+  // 故障注入实验条件（M7）：profile 名或 "profile:seed"，如 "medium" / "medium:42"；缺省不注入
+  fault?: string;
 }
 
 // 单次实验报告
@@ -85,12 +90,17 @@ export function loadTask(taskId: string): Task {
   throw new Error(`任务不存在: ${taskId}（在 ${TASKS_DIR} 下未找到）`);
 }
 
-// 按任务类别装配工具环境：M1 仅 planning → robot_world
-function loadTools(task: Task): Tool[] {
+// 按任务类别装配工具环境：M1 仅 planning → robot_world；故障条件在环境侧包装实施
+function loadTools(task: Task, fault?: string): Tool[] {
+  let tools: Tool[] = [];
   if (task.category === "planning" && typeof task.input.map === "string") {
-    return createRobotWorldTools(task.input.map);
+    tools = createRobotWorldTools(task.input.map);
   }
-  return [];
+  if (fault !== undefined && fault !== "clean") {
+    const resolved = resolveFaultProfile(fault);
+    tools = wrapToolsWithFaults(tools, resolved.config, resolved.seed);
+  }
+  return tools;
 }
 
 // 架构注册表：新增架构只需在此登记
@@ -158,7 +168,7 @@ function deriveMetrics(report: Omit<BenchmarkReport, "metrics">): BenchmarkRepor
   };
 }
 
-// 默认 Run 级评估器链：success 裁决 + efficiency/cost 观测 + behavior 行为观测（M6）
+// 默认 Run 级评估器链：success 裁决 + efficiency/cost 观测 + behavior 行为观测（M6）+ robustness（M7）
 function defaultEvaluators(): Evaluator[] {
   return [
     new SuccessEvaluator(),
@@ -166,7 +176,8 @@ function defaultEvaluators(): Evaluator[] {
     new CostEvaluator(),
     new ToolUsageEvaluator(),
     new PlanningEvaluator(),
-    new ErrorsEvaluator()
+    new ErrorsEvaluator(),
+    new RobustnessEvaluator()
   ];
 }
 
@@ -182,8 +193,8 @@ export async function benchmark(
   const { provider, instance: model } = resolveModel(options.model);
   const agent = resolveAgent(options.agent);
 
-  // 环境与 Agent 都按任务独立装配，保证每次运行状态干净
-  const tools = loadTools(task);
+  // 环境与 Agent 都按任务独立装配，保证每次运行状态干净（故障条件作为实验条件传入）
+  const tools = loadTools(task, options.fault);
   await agent.init({ model, tools, options: options.agentOptions });
 
   const result = await agent.run(task);

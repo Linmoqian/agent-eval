@@ -6,6 +6,7 @@
 import { runExperiment, EXPERIMENTS_DIR, type ExperimentReport } from "./experiment.js";
 import { AGENT_IDS } from "./benchmark.js";
 import { createCompatibleModel } from "../models/openai-compatible/openai_compatible.js";
+import { resolveFaultProfile } from "../core/fault.js";
 
 // 解析 --key value 形式的命令行参数
 function parseArgs(argv: string[]): Record<string, string> {
@@ -49,17 +50,19 @@ async function main(): Promise<void> {
   const agents = splitList(args.agents, ["raw"]);
   const models = splitList(args.models, ["openai"]);
   const runs = Number(args.runs ?? "1");
+  const fault = args.fault ?? "clean";
   const outDir = args.out !== undefined ? args.out : EXPERIMENTS_DIR;
 
   if (tasks.length === 0) {
     console.error(
       [
-        "用法：node dist/runner/cli.js --tasks <ids> [--agents <ids>] [--models <ids>] [--runs <n>] [--out <dir>]",
+        "用法：node dist/runner/cli.js --tasks <ids> [--agents <ids>] [--models <ids>] [--runs <n>] [--fault <profile[:seed]>] [--out <dir>]",
         "",
         "  --tasks   必填，逗号分隔，如 robot_path_001",
         "  --agents  缺省 raw；可选 raw,tool-loop,react,plan-execute,planner-executor",
         "  --models  缺省 openai；厂商 id 或 provider:model，如 deepseek,zhipu:glm-4.5-air",
         "  --runs    缺省 1",
+        "  --fault   缺省 clean；故障注入 profile 或 profile:seed，如 medium / heavy:42",
         "  --out     缺省 results/experiments"
       ].join("\n")
     );
@@ -89,7 +92,16 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`实验矩阵：${tasks.length} tasks × ${agents.length} agents × ${models.length} models × ${runs} runs = ${tasks.length * agents.length * models.length} experiments`);
+  // 故障 profile 提前校验：非法描述直接报错
+  try {
+    resolveFaultProfile(fault);
+  } catch (err) {
+    console.error(String(err));
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`实验矩阵：${tasks.length} tasks × ${agents.length} agents × ${models.length} models × ${runs} runs × fault=${fault} = ${tasks.length * agents.length * models.length} experiments`);
 
   const experiments: ExperimentReport[] = [];
   const errors: string[] = [];
@@ -97,7 +109,7 @@ async function main(): Promise<void> {
     for (const agent of agents) {
       for (const model of models) {
         try {
-          const experiment = await runExperiment({ task, agent, model, runs, outDir });
+          const experiment = await runExperiment({ task, agent, model, runs, fault, outDir });
           experiments.push(experiment);
         } catch (err) {
           // 单实验失败不中断矩阵：记录后继续（如网络错误、预算耗尽）

@@ -26,7 +26,7 @@ export interface ToolUsageDetails {
 }
 
 // 调用指纹：工具名 + 排序后参数序列化，参数键序不影响判重
-function callFingerprint(name: string, args: Record<string, unknown>): string {
+export function callFingerprint(name: string, args: Record<string, unknown>): string {
   const sorted: Record<string, unknown> = {};
   for (const key of Object.keys(args).sort()) {
     sorted[key] = args[key];
