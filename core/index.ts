@@ -17,3 +17,4 @@ export type { StepKind, TraceStep, Trace, TraceEvent } from "./trace.js";
 export { createTrace } from "./trace.js";
 export type { AgentConfig, AgentResult, Agent } from "./agent.js";
 export type { EvaluationContext, EvaluationResult, Evaluator } from "./evaluator.js";
+export { loadEnvFile } from "./env.js";

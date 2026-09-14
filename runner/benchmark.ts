@@ -12,6 +12,7 @@ import type { EvaluationResult } from "../core/evaluator.js";
 import type { Model } from "../core/model.js";
 import { validateTask, type Task, type Tool } from "../core/index.js";
 import type { Trace } from "../core/trace.js";
+import { loadEnvFile } from "../core/env.js";
 
 import { RawAgent } from "../agents/raw/raw_agent.js";
 import { ToolLoopAgent } from "../agents/tool-loop/tool_loop_agent.js";
@@ -128,6 +129,9 @@ function deriveMetrics(report: Omit<BenchmarkReport, "metrics">): BenchmarkRepor
 
 // 单次完整评估：Agent 负责完成任务，Evaluator 负责评价任务，二者彻底解耦
 export async function benchmark(options: BenchmarkOptions): Promise<BenchmarkReport> {
+  // 统一加载项目根 .env（显式环境变量优先），确保真实模型调用能拿到 key
+  loadEnvFile(path.join(PROJECT_ROOT, ".env"));
+
   const task = loadTask(options.task);
   const { provider, instance: model } = resolveModel(options.model);
   const agent = resolveAgent(options.agent);
