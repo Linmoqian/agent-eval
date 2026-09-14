@@ -4,6 +4,9 @@
 // @author: https://github.com/Linmoqian
 
 import type { Trace } from "../core/trace.js";
+import type { ToolUsageDetails } from "../evaluators/behavior/tool_usage.js";
+import type { PlanningDetails } from "../evaluators/behavior/planning.js";
+import type { ErrorsDetails } from "../evaluators/behavior/errors.js";
 
 import { benchmark, type BenchmarkReport } from "./benchmark.js";
 import { ScriptedModel } from "../models/local/scripted_model.js";
@@ -48,6 +51,37 @@ function evaluationOf(r: BenchmarkReport, name: string): { passed: boolean; scor
   const found = r.evaluations.find((e) => e.evaluator === name);
   if (found === undefined) throw new Error(`${r.agent.name}: 缺少 ${name} 评估结果`);
   return { passed: found.passed, score: found.score, details: found.details };
+}
+
+// 按名取评估明细并断言类型
+function detailsOf<T>(r: BenchmarkReport, name: string): T {
+  return evaluationOf(r, name).details as T;
+}
+
+// M6 行为对比表：全部从 Trace 派生，回答“都成功了，但成功方式为什么不同”
+function printBehaviorTable(reports: BenchmarkReport[]): void {
+  const rows: string[][] = [
+    ["Architecture", "Success", "ToolCalls", "Duplicate", "Invalid", "Plans", "Replans"]
+  ];
+  for (const r of reports) {
+    const success = evaluationOf(r, "success").score;
+    const usage = detailsOf<ToolUsageDetails>(r, "tool-usage");
+    const planning = detailsOf<PlanningDetails>(r, "planning");
+    rows.push([
+      r.agent.name,
+      success.toFixed(2),
+      String(usage.toolCalls),
+      String(usage.duplicateToolCalls),
+      String(usage.invalidToolCalls),
+      String(planning.plansCreated),
+      String(planning.planRevisions)
+    ]);
+  }
+  const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+  console.log("\n===== 架构行为对比（全部从 Trace 派生）=====");
+  for (const row of rows) {
+    console.log(row.map((cell, i) => cell.padEnd(widths[i])).join("  "));
+  }
 }
 
 // 断言收集器：失败信息汇总后统一判定
@@ -158,9 +192,85 @@ async function main(): Promise<void> {
   expect(peFailedObs === 1, `planner-executor: 应有 1 次失败观测，实际 ${peFailedObs}`);
   expect(evaluationOf(peReport, "success").passed, "planner-executor: 重规划后应完成任务");
 
+  // ===== M6 断言：行为指标从 Trace 自动派生且与剧本设计一致 =====
+  const allReports = [rawReport, loopReport, reactReport, planReport, peReport];
+  for (const r of allReports) {
+    // 六个评估器全部在链上
+    for (const name of ["success", "efficiency", "cost", "tool-usage", "planning", "errors"]) {
+      expect(
+        r.evaluations.some((e) => e.evaluator === name),
+        `${r.agent.name}: 缺少 ${name} 评估器`
+      );
+    }
+    // 行为指标与 efficiency 的交叉验证：toolCalls 口径一致
+    const usage = detailsOf<ToolUsageDetails>(r, "tool-usage");
+    const eff = detailsOf<{ toolCalls: number }>(r, "efficiency");
+    expect(
+      usage.toolCalls === eff.toolCalls,
+      `${r.agent.name}: tool-usage 与 efficiency 的 toolCalls 不一致`
+    );
+  }
+
+  const rawUsage = detailsOf<ToolUsageDetails>(rawReport, "tool-usage");
+  const rawPlanning = detailsOf<PlanningDetails>(rawReport, "planning");
+  expect(rawUsage.toolCalls === 0, `raw: 应无工具调用，实际 ${rawUsage.toolCalls}`);
+  expect(rawPlanning.plansCreated === 0, "raw: 应无计划事件");
+
+  const loopUsage = detailsOf<ToolUsageDetails>(loopReport, "tool-usage");
+  expect(
+    loopUsage.duplicateToolCalls === 2,
+    `tool-loop: 盲循环应产生 2 次重复调用，实际 ${loopUsage.duplicateToolCalls}`
+  );
+  expect(loopUsage.invalidToolCalls === 0, "tool-loop: 剧本不应有无效调用");
+  expect(
+    loopUsage.toolRedundancy !== null && loopUsage.toolRedundancy > 0,
+    "tool-loop: toolRedundancy 应为正值"
+  );
+
+  const reactUsage = detailsOf<ToolUsageDetails>(reactReport, "tool-usage");
+  expect(
+    reactUsage.duplicateToolCalls === 1,
+    `react: 应产生 1 次重复调用，实际 ${reactUsage.duplicateToolCalls}`
+  );
+  expect(reactUsage.invalidToolCalls === 0, "react: 剧本不应有无效调用");
+
+  const planUsage = detailsOf<ToolUsageDetails>(planReport, "tool-usage");
+  const planPlanning = detailsOf<PlanningDetails>(planReport, "planning");
+  expect(
+    planUsage.duplicateToolCalls === 0 && planUsage.invalidToolCalls === 0,
+    "plan-execute: 顺序执行不应有重复/无效调用"
+  );
+  expect(planPlanning.plansCreated === 1, "plan-execute: 应创建 1 份计划");
+  expect(planPlanning.planRevisions === 0, "plan-execute: 不应发生计划修订");
+  expect(
+    planPlanning.planningOverhead !== null && planPlanning.planningOverhead > 0,
+    "plan-execute: planningOverhead 应为正值"
+  );
+
+  const peUsage = detailsOf<ToolUsageDetails>(peReport, "tool-usage");
+  const pePlanning = detailsOf<PlanningDetails>(peReport, "planning");
+  const peErrors = detailsOf<ErrorsDetails>(peReport, "errors");
+  expect(
+    peUsage.invalidToolCalls === 1,
+    `planner-executor: 障碍失败应计 1 次无效调用，实际 ${peUsage.invalidToolCalls}`
+  );
+  expect(
+    peUsage.toolValidity !== null && peUsage.toolValidity < 1,
+    "planner-executor: toolValidity 应小于 1"
+  );
+  expect(pePlanning.planRevisions === 1, "planner-executor: 应有 1 次计划修订");
+  expect(
+    pePlanning.planningOverhead !== null && pePlanning.planningOverhead > 0,
+    "planner-executor: planningOverhead 应为正值"
+  );
+  expect(peErrors.fatalErrors === 0, "planner-executor: 失败应被重规划恢复，不应致命");
+
+  // 行为对比表：M6 的验收载体
+  printBehaviorTable(allReports);
+
   if (failures.length === 0) {
-    console.log("✅ M2 验证通过：5 架构完整运行，行为全部进入统一 Trace，结构差异可在事件流中观测。");
-    console.log("   raw=单次生成 | tool-loop=工具循环 | react=Reason+Act | plan-execute=先规划后执行 | planner-executor=双角色分离+重规划");
+    console.log("\n✅ M2+M6 验证通过：5 架构完整运行，行为指标全部从 Trace 自动派生。");
+    console.log("   raw=单次生成 | tool-loop=盲循环重复 | react=推理后重复确认 | plan-execute=顺序执行零冗余 | planner-executor=失败重规划恢复");
   } else {
     console.error("❌ M2 验证未达预期：");
     for (const f of failures) console.error(`   - ${f}`);

@@ -9,7 +9,7 @@ Agent 评估框架（TypeScript）。
 - `models/` 模型适配：openai-compatible（单一实现覆盖 openai/deepseek/glm/kimi/grok/gemini/qwen）+ local（离线剧本回放 ScriptedModel）
 - `tasks/` 任务集：planning / coding / tool-use / reasoning / robotics
 - `environments/` 任务环境：工具实现与地图数据（M1：robot_world）
-- `evaluators/` 评估器：success / efficiency / cost（Run 级）+ stability（Experiment 级）
+- `evaluators/` 评估器：success / efficiency / cost / behavior（Run 级：tool-usage / planning / errors）+ stability（Experiment 级）
 - `runner/` 实验调度：`benchmark.ts`（单次）、`experiment.ts`（多 run 聚合）、`cli.ts`（矩阵调度）、离线验证脚本（`demo.ts` / `demo_experiment.ts`）
 - `results/` 评估结果输出（不入库）
 
@@ -127,17 +127,33 @@ trace.record({ kind: "tool_result", callId, name, observation, ok });
 ## 里程碑进度
 
 ```text
-M0 Core Protocol        ✅
-M1 Minimal Benchmark    ✅ robot_path_001 × {raw, tool-loop} × {openai, scripted} × success
-M2 Agent Architectures  ✅ raw / tool-loop / react / plan-execute / planner-executor × 统一 Trace 事件
-M3 Model Adapters       ✅ openai-compatible 单一实现覆盖 7 家兼容厂商（anthropic 原生 API 待补）
-M4 Metrics & Experiment ✅ success / efficiency / cost / stability + ModelPricing + Experiment 聚合层
-M5 Batch Runner         ✅ cli 矩阵调度：tasks × agents × models × runs，exp 目录结构 + ArchitectureGain 列
-M6 Behavior Metrics     ⬜ tool_error_rate / redundancy / plan_revision_count / recovery
-M7 Robustness           ⬜ FaultInjector（工具超时/异常/噪声观测）+ recovery_rate
-M8 Task Suite           ⬜ 每 category easy/medium/hard
-M9 Stats & Viz          ⬜ 统计检验、ArchitectureGain × ModelGain 矩阵可视化
+M0 Core Protocol            ✅
+M1 Minimal Benchmark         ✅ robot_path_001 × {raw, tool-loop} × {openai, scripted} × success
+M2 Architecture Family       ✅ raw / tool-loop / react / plan-execute / planner-executor × 统一 Trace 事件
+M3 Model Adapter Matrix      ✅ openai-compatible 单一实现覆盖 7 家兼容厂商（anthropic 原生 API 待补）
+M4 Metrics System            ✅ success / efficiency / cost / stability + ModelPricing
+M5 Experiment Runner         ✅ cli 矩阵调度：tasks × agents × models × runs，exp 目录结构 + ArchitectureGain 列
+M6 Agent Behavior Metrics    ✅ tool-usage / planning / errors：从 Trace 派生 invalid / duplicate / planRevisions / planningOverhead
+M7 Fault Injection           ⬜ FaultConfig（toolFailureRate / observationNoise 等）+ clean/light/medium/heavy profile + RecoveryRate
+M8 Task Suite                ⬜ 每类 easy/medium/hard + difficulty/tags 元数据
+M9 Real-Model Experiments    ⬜ 小矩阵起步（3 模型 × 5 架构 × 3 任务 × 10 runs）+ 固定 ExperimentConfig + Budget/Capability 双模式
+M10 Statistical Analysis     ⬜ ArchitectureGain × ModelCapability 统计检验（模型越强，架构还重要吗）
+M11 Visualization / Report   ⬜ 增益矩阵与趋势可视化
 ```
 
+## 行为指标（M6）
+
+全部从 Trace 事件派生，不增加 Agent 内部统计，定义见 `evaluators/behavior/README.md`：
+
+```text
+toolCalls / uniqueToolCalls / invalidToolCalls / duplicateToolCalls
+ToolValidity   = 1 - invalidToolCalls / toolCalls
+ToolRedundancy = duplicateToolCalls / toolCalls
+plansCreated / planRevisions
+PlanningOverhead = planningTokens / totalTokens   （purpose ∈ {plan, replan} 的调用占比）
+errors / fatalErrors
+```
+
+`npm run demo` 末尾输出架构行为对比表：都成功的架构，成功方式各不相同（tool-loop 盲循环重复、planner-executor 失败重规划恢复）。ExecutionEfficiency（TaskProgress / ToolCalls）依赖任务进度元数据，待 M8 接入。
 离线验证：`npm run demo`（M2）、`npm run demo:experiment`（M4/M5），均零网络请求。
 真实模型：在 `.env` 填入对应厂商 key 后 `npm run benchmark -- --models deepseek --runs 3`。

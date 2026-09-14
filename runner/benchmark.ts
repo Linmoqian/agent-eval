@@ -23,6 +23,9 @@ import { createCompatibleModel, listProviders } from "../models/openai-compatibl
 import { SuccessEvaluator } from "../evaluators/success/success_evaluator.js";
 import { EfficiencyEvaluator } from "../evaluators/efficiency/efficiency_evaluator.js";
 import { CostEvaluator } from "../evaluators/cost/cost_evaluator.js";
+import { ToolUsageEvaluator } from "../evaluators/behavior/tool_usage.js";
+import { PlanningEvaluator } from "../evaluators/behavior/planning.js";
+import { ErrorsEvaluator } from "../evaluators/behavior/errors.js";
 import { createRobotWorldTools } from "../environments/robot_world/env.js";
 
 // 项目根（dist/runner → 上一级两级），任务与结果目录都相对它定位
@@ -155,9 +158,16 @@ function deriveMetrics(report: Omit<BenchmarkReport, "metrics">): BenchmarkRepor
   };
 }
 
-// 默认 Run 级评估器链：success 裁决 + efficiency/cost 观测
+// 默认 Run 级评估器链：success 裁决 + efficiency/cost 观测 + behavior 行为观测（M6）
 function defaultEvaluators(): Evaluator[] {
-  return [new SuccessEvaluator(), new EfficiencyEvaluator(), new CostEvaluator()];
+  return [
+    new SuccessEvaluator(),
+    new EfficiencyEvaluator(),
+    new CostEvaluator(),
+    new ToolUsageEvaluator(),
+    new PlanningEvaluator(),
+    new ErrorsEvaluator()
+  ];
 }
 
 // 单次完整评估：Agent 负责完成任务，Evaluator 负责评价任务，二者彻底解耦

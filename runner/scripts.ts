@@ -20,11 +20,15 @@ export function buildRawScript(): ScriptedResponse[] {
   return [{ content: "根据地图，应该依次访问 8 个目标点（规划建议，未实际执行）。" }];
 }
 
-// ===== tool-loop 剧本：无显式推理，首轮并行调用两个工具 =====
+// ===== tool-loop 剧本：无显式推理，盲循环的典型行为是重复调用（无记忆/不信任观测）=====
 export function buildToolLoopScript(): ScriptedResponse[] {
   return [
     { toolCalls: [scriptedToolCall("scan", {}), scriptedToolCall("clear", { x: 4, y: 2 })] },
+    // 不信任首轮观测，重复扫描（重复调用 #1）
+    { toolCalls: [scriptedToolCall("scan", {})] },
     ...TARGETS.map(([x, y]) => ({ toolCalls: [scriptedToolCall("move", { x, y })] })),
+    // 无状态跟踪，盲目重走首个目标（重复调用 #2）
+    { toolCalls: [scriptedToolCall("move", { x: TARGETS[0][0], y: TARGETS[0][1] })] },
     { content: "已扫描地图、清除障碍并依次到达全部 8 个目标点，任务完成。" }
   ];
 }
@@ -47,6 +51,11 @@ export function buildReactScript(): ScriptedResponse[] {
       toolCalls: [scriptedToolCall("move", { x, y })]
     });
   }
+  // 观测未进入信念，对首个目标重复确认（重复调用 #1）
+  script.push({
+    content: "Thought: 不确定 (2,1) 是否已标记完成，再次移动确认。",
+    toolCalls: [scriptedToolCall("move", { x: 2, y: 1 })]
+  });
   script.push({ content: "Thought: 全部 8 个目标点已到达，任务完成，输出总结。" });
   return script;
 }
