@@ -13,5 +13,7 @@ export type {
   ModelResponse,
   Model
 } from "./model.js";
-export type { StepKind, TraceStep, Trace } from "./trace.js";
+export type { StepKind, TraceStep, Trace, TraceEvent } from "./trace.js";
+export { createTrace } from "./trace.js";
 export type { AgentConfig, AgentResult, Agent } from "./agent.js";
+export type { EvaluationContext, EvaluationResult, Evaluator } from "./evaluator.js";

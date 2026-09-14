@@ -1,13 +1,4 @@
-# 依赖
 node_modules/
-
-# 构建产物
 dist/
-*.log
-
-# 环境变量（密钥不入库）
+results/
 .env
-
-# 评估结果：目录保留、内容不入库
-results/*
-!results/.gitkeep

@@ -4,6 +4,9 @@
 
 import type { ToolCall, ToolSpec } from "./tool.js";
 
+// 便捷重导出：模型适配器从 model.js 即可拿到全部相关类型
+export type { ToolCall, ToolSpec } from "./tool.js";
+
 // 消息角色
 export type MessageRole = "system" | "user" | "assistant" | "tool";
 

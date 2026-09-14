@@ -4,12 +4,13 @@ Agent 评估框架（TypeScript）。
 
 ## 目录结构
 
-- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`、`Evaluator`
+- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（含统一 `record()` 收集器）、`Evaluator`
 - `agents/` Agent 实现：raw / react / tool-loop / plan-execute / planner-executor
-- `models/` 模型适配：openai / anthropic / gemini / qwen / local
+- `models/` 模型适配：openai / anthropic / gemini / qwen / local（含离线剧本回放 ScriptedModel）
 - `tasks/` 任务集：planning / coding / tool-use / reasoning / robotics
+- `environments/` 任务环境：工具实现与地图数据（M1：robot_world）
 - `evaluators/` 评估器：success / efficiency / robustness / cost / stability
-- `runner/` 批量评估入口（`benchmark.ts`）
+- `runner/` 批量评估入口（`benchmark.ts`）与链路验证脚本（`demo.ts`）
 - `results/` 评估结果输出（不入库）
 
 ## 使用
@@ -17,6 +18,7 @@ Agent 评估框架（TypeScript）。
 ```bash
 npm install
 npm run typecheck
+npm run build && npm run demo   # 离线跑通 M1 全链路（零网络请求）
 ```
 
 ## 核心接口（统一输入协议）
@@ -56,4 +58,45 @@ interface Agent {
 const agent = new ReactAgent({ model: new QwenModel("qwen-max") })
 ```
 
-辅助类型：`Message` / `TokenUsage`（`model.ts`）、`ToolSpec` / `Tool` / `ToolCall`（`tool.ts`）、`TraceStep` / `Trace`（`trace.ts`），统一从 `core/index.ts` 导入。
+辅助类型：`Message` / `TokenUsage`（`model.ts`）、`ToolSpec` / `Tool` / `ToolCall`（`tool.ts`）、`TraceStep` / `Trace`（`trace.ts`），统一从 `core/index.ts` 导出。
+
+## 评估解耦原则
+
+**Agent 负责完成任务，Evaluator 负责评价任务**，二者只通过 `EvaluationContext` 交互：
+
+```ts
+interface EvaluationContext {
+  task: Task;
+  result: AgentResult;
+  trace: Trace;
+}
+
+// 所有评估器都只是观测函数：E = f(Task, Result, Trace)
+interface Evaluator<T = unknown> {
+  name: string;
+  evaluate(context: EvaluationContext): Promise<EvaluationResult<T>>;
+}
+```
+
+`Trace` 不由 Agent 随意维护，而是统一收集器：Agent 只产生事件，框架负责编号与计时，后续 tool_calls / latency / tokens / 失败位置均可从 Trace 派生：
+
+```ts
+const trace = createTrace(task.task_id, agent.name);
+trace.record({ kind: "model_call", usage, thought: "..." });
+trace.record({ kind: "action", action: toolCall });
+trace.record({ kind: "observation", observation: "..." });
+```
+
+## 里程碑进度
+
+```text
+M0 Core Protocol        ✅
+M1 Minimal Benchmark    ✅ robot_path_001 × {raw, tool-loop} × {openai, scripted} × success
+M2 Agent Architectures  ⬜ react / plan-execute / planner-executor
+M3 Model Adapters       ⬜ anthropic / gemini / qwen
+M4 Evaluator System     ⬜ efficiency / cost / stability / robustness
+M5+ Experiment Runner   ⬜ 多任务、重复运行、统计、排行榜、可视化
+```
+
+M1 验证方式：`npm run build && npm run demo`（离线剧本模型，详见 `runner/README.md`）。
+接入真实模型：设 `OPENAI_API_KEY`（可选 `OPENAI_MODEL`），`benchmark({ ..., model: "openai" })`。
