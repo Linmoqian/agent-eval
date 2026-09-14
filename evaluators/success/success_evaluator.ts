@@ -38,9 +38,10 @@ export class SuccessEvaluator implements Evaluator<SuccessDetails> {
   async evaluate(context: EvaluationContext): Promise<EvaluationResult<SuccessDetails>> {
     const { task, result, trace } = context;
 
-    // 环境观测是唯一事实来源，从轨迹逐步扫描取最大完成数
+    // 环境观测是唯一事实来源，从 tool_result 事件逐步扫描取最大完成数
     const completed = trace.steps.reduce(
-      (best, step) => Math.max(best, step.observation !== undefined ? extractCompleted(step.observation) : -1),
+      (best, step) =>
+        step.kind === "tool_result" ? Math.max(best, extractCompleted(step.observation)) : best,
       -1
     );
     const finalCompleted = completed < 0 ? 0 : completed;

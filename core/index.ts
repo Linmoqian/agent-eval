@@ -13,7 +13,21 @@ export type {
   ModelResponse,
   Model
 } from "./model.js";
-export type { StepKind, TraceStep, Trace, TraceEvent } from "./trace.js";
+export type {
+  PlanStep,
+  ModelCallEvent,
+  ModelResponseEvent,
+  ThoughtEvent,
+  ToolCallEvent,
+  ToolResultEvent,
+  PlanCreatedEvent,
+  PlanUpdatedEvent,
+  AgentStateEvent,
+  ErrorEvent,
+  TraceEvent,
+  TraceStep,
+  Trace
+} from "./trace.js";
 export { createTrace } from "./trace.js";
 export type { AgentConfig, AgentResult, Agent } from "./agent.js";
 export type { EvaluationContext, EvaluationResult, Evaluator } from "./evaluator.js";

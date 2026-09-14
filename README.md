@@ -4,8 +4,8 @@ Agent 评估框架（TypeScript）。
 
 ## 目录结构
 
-- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（含统一 `record()` 收集器）、`Evaluator`
-- `agents/` Agent 实现：raw / react / tool-loop / plan-execute / planner-executor
+- `core/` 核心抽象：`Task`、`Agent`、`Model`、`Tool`、`Trace`（判别联合事件 + 统一 `record()` 收集器）、`Evaluator`
+- `agents/` Agent 实现：raw / tool-loop / react / plan-execute / planner-executor
 - `models/` 模型适配：openai / anthropic / gemini / qwen / local（含离线剧本回放 ScriptedModel）
 - `tasks/` 任务集：planning / coding / tool-use / reasoning / robotics
 - `environments/` 任务环境：工具实现与地图数据（M1：robot_world）
@@ -78,25 +78,43 @@ interface Evaluator<T = unknown> {
 }
 ```
 
-`Trace` 不由 Agent 随意维护，而是统一收集器：Agent 只产生事件，框架负责编号与计时，后续 tool_calls / latency / tokens / 失败位置均可从 Trace 派生：
+`Trace` 不由 Agent 随意维护，而是统一事件收集器：Agent 只产生事件，框架负责编号与计时，后续 tool_calls / latency / tokens / 失败位置均可从 Trace 派生。事件为判别联合，架构比较时数据结构不会碎掉：
 
 ```ts
+type TraceEvent =
+  | ModelCallEvent      // 发起模型调用（round / purpose / 上下文规模）
+  | ModelResponseEvent  // 收到响应（content / toolCalls / usage / finishReason）
+  | ThoughtEvent        // 推理步骤（ReAct 的 Reason，source: model | agent）
+  | ToolCallEvent       // 发起工具调用
+  | ToolResultEvent     // 工具观测（ok / durationMs）
+  | PlanCreatedEvent    // 计划创建（steps 快照）
+  | PlanUpdatedEvent    // 计划更新（step_* / revised）
+  | AgentStateEvent     // phase 变迁（planning / executing / replanning / finalizing）
+  | ErrorEvent;         // 错误（fatal 标记）
+
 const trace = createTrace(task.task_id, agent.name);
-trace.record({ kind: "model_call", usage, thought: "..." });
-trace.record({ kind: "action", action: toolCall });
-trace.record({ kind: "observation", observation: "..." });
+trace.record({ kind: "model_call", round: 1, purpose: "act" });
+trace.record({ kind: "model_response", usage, content, toolCalls });
+trace.record({ kind: "tool_call", call });
+trace.record({ kind: "tool_result", callId, name, observation, ok });
 ```
+
+`model_call` 与 `model_response` 成对出现，两个事件的 timestamp 差即单次模型调用延迟；工具同理。
 
 ## 里程碑进度
 
 ```text
 M0 Core Protocol        ✅
 M1 Minimal Benchmark    ✅ robot_path_001 × {raw, tool-loop} × {openai, scripted} × success
-M2 Agent Architectures  ⬜ react / plan-execute / planner-executor
-M3 Model Adapters       ⬜ anthropic / gemini / qwen
-M4 Evaluator System     ⬜ efficiency / cost / stability / robustness
-M5+ Experiment Runner   ⬜ 多任务、重复运行、统计、排行榜、可视化
+M2 Agent Architectures  ✅ raw / tool-loop / react / plan-execute / planner-executor × 统一 Trace 事件
+M3 Model Adapters       ⬜ openai-compatible 矩阵（deepseek/glm/kimi/grok）+ anthropic / gemini / local
+M4 Metrics & Experiment ⬜ efficiency / cost / stability + Experiment 聚合层
+M5 Batch Runner         ⬜ tasks × agents × models × runs 实验调度器
+M6 Behavior Metrics     ⬜ tool_error_rate / redundancy / plan_revision_count / recovery
+M7 Robustness           ⬜ FaultInjector（工具超时/异常/噪声观测）+ recovery_rate
+M8 Task Suite           ⬜ 每 category easy/medium/hard
+M9 Stats & Viz          ⬜ 统计检验、ArchitectureGain × ModelGain 矩阵可视化
 ```
 
-M1 验证方式：`npm run build && npm run demo`（离线剧本模型，详见 `runner/README.md`）。
+M2 验证方式：`npm run build && npm run demo`（5 架构离线剧本验证，详见 `runner/README.md`）。
 接入真实模型：设 `OPENAI_API_KEY`（可选 `OPENAI_MODEL`），`benchmark({ ..., model: "openai" })`。

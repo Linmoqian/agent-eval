@@ -16,6 +16,9 @@ import { loadEnvFile } from "../core/env.js";
 
 import { RawAgent } from "../agents/raw/raw_agent.js";
 import { ToolLoopAgent } from "../agents/tool-loop/tool_loop_agent.js";
+import { ReactAgent } from "../agents/react/react_agent.js";
+import { PlanExecuteAgent } from "../agents/plan-execute/plan_execute_agent.js";
+import { PlannerExecutorAgent } from "../agents/planner-executor/planner_executor_agent.js";
 import { OpenAIModel } from "../models/openai/openai_model.js";
 import { SuccessEvaluator } from "../evaluators/success/success_evaluator.js";
 import { createRobotWorldTools } from "../environments/robot_world/env.js";
@@ -29,8 +32,10 @@ const RESULTS_DIR = path.join(PROJECT_ROOT, "results");
 export interface BenchmarkOptions {
   // 任务 id，如 "robot_path_001"，在 tasks/ 下按文件名查找
   task: string;
-  // 架构名："raw" | "tool-loop"
+  // 架构名："raw" | "tool-loop" | "react" | "plan-execute" | "planner-executor"
   agent: string;
+  // 架构自定义参数（如 planner-executor 的 plannerModel），透传给 agent.init
+  agentOptions?: Record<string, unknown>;
   // 模型："openai" 走真实适配器；或直接传入 Model 实例（如 ScriptedModel）
   model: string | Model;
   // 结果落盘目录，默认 results/
@@ -89,6 +94,12 @@ function resolveAgent(name: string): Agent {
       return new RawAgent();
     case "tool-loop":
       return new ToolLoopAgent();
+    case "react":
+      return new ReactAgent();
+    case "plan-execute":
+      return new PlanExecuteAgent();
+    case "planner-executor":
+      return new PlannerExecutorAgent();
     default:
       throw new Error(`未注册的 Agent 架构: ${name}`);
   }
@@ -107,19 +118,19 @@ function resolveModel(model: string | Model): { provider: string; instance: Mode
 
 // 从 Trace 派生指标：观测层是唯一事实来源
 function deriveMetrics(report: Omit<BenchmarkReport, "metrics">): BenchmarkReport["metrics"] {
-  const toolCalls = report.trace.steps.filter((s) => s.kind === "action").length;
-  const inputTokens = report.trace.steps.reduce(
-    (sum, s) => sum + (s.usage?.promptTokens ?? 0),
-    0
-  );
-  const outputTokens = report.trace.steps.reduce(
-    (sum, s) => sum + (s.usage?.completionTokens ?? 0),
-    0
-  );
+  const toolCalls = report.trace.steps.filter((s) => s.kind === "tool_call").length;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let lastTimestamp = 0;
+  for (const step of report.trace.steps) {
+    if (step.kind === "model_response") {
+      inputTokens += step.usage.promptTokens;
+      outputTokens += step.usage.completionTokens;
+    }
+    lastTimestamp = step.timestamp;
+  }
   return {
-    durationMs: report.trace.steps.length > 0
-      ? report.trace.steps[report.trace.steps.length - 1].timestamp
-      : 0,
+    durationMs: lastTimestamp,
     inputTokens,
     outputTokens,
     toolCalls,
@@ -138,7 +149,7 @@ export async function benchmark(options: BenchmarkOptions): Promise<BenchmarkRep
 
   // 环境与 Agent 都按任务独立装配，保证每次运行状态干净
   const tools = loadTools(task);
-  await agent.init({ model, tools });
+  await agent.init({ model, tools, options: options.agentOptions });
 
   const result = await agent.run(task);
 

@@ -1,4 +1,5 @@
 // 工具循环 Agent：模型请求工具 → 执行 → observation 回传 → 循环，直至出文本/超步/出错
+// 结构特点：无显式推理步骤、每轮可并行发起多个工具调用
 // Created on 2026-09-13
 // @author: https://github.com/Linmoqian
 
@@ -7,7 +8,15 @@ import type { Message, Model, TokenUsage } from "../../core/model.js";
 import type { Task } from "../../core/task.js";
 import type { Tool } from "../../core/tool.js";
 import { createTrace } from "../../core/trace.js";
-import { addUsage, buildTaskPrompt, recordModelCall } from "../common.js";
+import {
+  addUsage,
+  buildTaskPrompt,
+  recordModelRequest,
+  recordModelResponse,
+  requireModel,
+  runToolCall,
+  selectTools
+} from "../common.js";
 
 // 默认迭代上限，与任务 constraints.max_steps 取较小值（每轮模型调用记一步）
 const DEFAULT_MAX_STEPS = 20;
@@ -25,19 +34,13 @@ export class ToolLoopAgent implements Agent {
   }
 
   async run(task: Task): Promise<AgentResult> {
-    if (this.model === null) throw new Error("ToolLoopAgent 未 init");
+    const model = requireModel(this.model, this.name);
     const startedAt = Date.now();
     const trace = createTrace(task.task_id, this.name);
     const usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-    // 按任务允许的工具列表取子集
-    const allowed = new Set(task.tools);
-    const tools = this.toolPool.filter((t) => allowed.has(t.name));
-    const toolSpecs = tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters
-    }));
+    const { tools, toolNames, specs } = selectTools(this.toolPool, task.tools);
+    const generateOptions = specs.length > 0 ? { tools: specs } : undefined;
 
     const maxSteps = Math.min(
       task.constraints?.max_steps ?? Number.MAX_SAFE_INTEGER,
@@ -58,11 +61,14 @@ export class ToolLoopAgent implements Agent {
       let finalAnswer: string | null = null;
       while (round < maxSteps) {
         round += 1;
-        const resp = await this.model.generate(
-          messages,
-          toolSpecs.length > 0 ? { tools: toolSpecs } : undefined
-        );
-        recordModelCall(trace, resp);
+        recordModelRequest(trace, {
+          round,
+          purpose: "act",
+          messageCount: messages.length,
+          tools: toolNames
+        });
+        const resp = await model.generate(messages, generateOptions);
+        recordModelResponse(trace, resp);
         addUsage(usage, resp.usage);
 
         // 无工具调用：模型给出最终答案
@@ -79,20 +85,7 @@ export class ToolLoopAgent implements Agent {
         });
 
         for (const call of resp.toolCalls) {
-          trace.record({ kind: "action", action: call });
-          const impl = tools.find((t) => t.name === call.name);
-          let output: unknown;
-          if (impl === undefined) {
-            output = { ok: false, reason: `unknown_tool: ${call.name}` };
-          } else {
-            try {
-              output = await impl.execute(call.arguments);
-            } catch (err) {
-              output = { ok: false, reason: `tool_error: ${String(err)}` };
-            }
-          }
-          const observation = JSON.stringify(output);
-          trace.record({ kind: "observation", observation });
+          const { observation } = await runToolCall(trace, tools, call);
           messages.push({
             role: "tool",
             content: observation,
@@ -104,7 +97,7 @@ export class ToolLoopAgent implements Agent {
 
       const exhausted = finalAnswer === null && round >= maxSteps;
       if (exhausted) {
-        trace.record({ kind: "error", thought: `步数耗尽: ${round}/${maxSteps}` });
+        trace.record({ kind: "error", message: `步数耗尽: ${round}/${maxSteps}`, fatal: true });
       }
 
       return {
@@ -118,7 +111,7 @@ export class ToolLoopAgent implements Agent {
         error: exhausted ? `步数耗尽: ${round}/${maxSteps}` : undefined
       };
     } catch (err) {
-      trace.record({ kind: "error", thought: String(err) });
+      trace.record({ kind: "error", message: String(err), fatal: true });
       return {
         taskId: task.task_id,
         agentName: this.name,
